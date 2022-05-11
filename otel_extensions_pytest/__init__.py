@@ -4,25 +4,120 @@ from otel_extensions import (
     init_telemetry_provider,
     TelemetryOptions as BaseTelemetryOptions,
     flush_telemetry_data,
-    get_tracer
+    get_tracer,
+    Instrumented,
 )
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode, Span, Tracer
 import logging
-from typing import Optional, Iterator, Union
+from typing_extensions import Literal
+from typing import Optional, Union, Callable, Iterable, Any
 import traceback
 import pytest
+from _pytest.fixtures import FixtureFunctionMarker
+from contextlib import ExitStack
 
 DEFAULT_SESSION_NAME = "pytest session"
 DEFAULT_SERVICE_NAME = "otel_extensions_pytest"
 
 tracer: Optional[Tracer]
-session_span: Optional[Span]
-session_span_iterator: Optional[Iterator[Span]]
+session_context_stack: Optional[ExitStack] = None
 
 
 class TelemetryOptions(BaseTelemetryOptions):
+    """Settings class holding options for telemetry"""
+
     OTEL_SESSION_NAME: str = DEFAULT_SESSION_NAME
+
+
+class InstrumentedFixture(Instrumented):
+    """Helper class for wrapping a fixture function"""
+
+    def __init__(
+        self,
+        fixture: FixtureFunctionMarker,
+        span_name: str = None,
+        service_name: str = None,
+    ):
+        super().__init__(span_name, service_name)
+        self.fixture = fixture
+
+    def __call__(self, wrapped_function: Callable) -> Callable:
+        new_f = super(wrapped_function)
+        return self.fixture(new_f)
+
+
+def instrumented_fixture(
+    fixture_function: Optional[Callable] = None,
+    *,
+    scope: Literal["session", "module", "package", "class", "function"] = "function",
+    params: Optional[Iterable[object]] = None,
+    autouse: bool = False,
+    ids: Optional[
+        Union[
+            Iterable[Union[None, str, float, int, bool]],
+            Callable[[Any], Optional[object]],
+        ]
+    ] = None,
+    name: Optional[str] = None,
+    span_name: Optional[str] = None,
+) -> Union[FixtureFunctionMarker, Callable]:
+    """
+    Decorator to enable opentelemetry instrumentation on a pytest fixture.
+
+    When the decorator is used, a child span will be created in the current trace
+    context, using the fully-qualified function name as the span name.
+    Alternatively, the span name can be set manually by setting the span_name parameter
+
+
+    :param scope:
+        The scope for which this fixture is shared; one of ``"function"``
+        (default), ``"class"``, ``"module"``, ``"package"`` or ``"session"``.
+
+        This parameter may also be a callable which receives ``(fixture_name, config)``
+        as parameters, and must return a ``str`` with one of the values mentioned above.
+
+        See :ref:`dynamic scope` in the docs for more information.
+
+    :param params:
+        An optional list of parameters which will cause multiple invocations
+        of the fixture function and all of the tests using it. The current
+        parameter is available in ``request.param``.
+
+    :param autouse:
+        If True, the fixture func is activated for all tests that can see it.
+        If False (the default), an explicit reference is needed to activate
+        the fixture.
+
+    :param ids:
+        Sequence of ids each corresponding to the params so that they are
+        part of the test id. If no ids are provided they will be generated
+        automatically from the params.
+
+    :param name:
+        The name of the fixture. This defaults to the name of the decorated
+        function. If a fixture is used in the same module in which it is
+        defined, the function name of the fixture will be shadowed by the
+        function arg that requests the fixture; one way to resolve this is to
+        name the decorated function ``fixture_<fixturename>`` and then use
+        ``@pytest.fixture(name='<fixturename>')``.
+
+    :param span_name:
+         optional span name.  Defaults to fully qualified function name of fixture, or the ``name``
+         parameter if it is provided
+
+    """
+    marker = InstrumentedFixture(
+        fixture=FixtureFunctionMarker(
+            scope=scope, params=params, autouse=autouse, ids=ids, name=name
+        ),
+        span_name=span_name,
+    )
+
+    if fixture_function:
+        return marker(fixture_function)
+
+    return marker
 
 
 def pytest_addoption(parser):
@@ -63,13 +158,13 @@ def pytest_addoption(parser):
     )
 
 
-def pytest_sessionstart(session):
-    """
-    Sets up telemetry collection and starts the session span
-    """
-    global session_span, tracer, session_span_iterator
-    options = TelemetryOptions()
-    config = session.config
+def init_telemetry(config: pytest.Config, options: Optional[TelemetryOptions] = None):
+    global session_context_stack, tracer
+    if session_context_stack is not None:
+        _logger().error("init_telemetry can only be called once!")
+        return
+    if options is None:
+        options = TelemetryOptions()
     options.OTEL_EXPORTER_OTLP_ENDPOINT = (
         config.getoption("otel_endpoint") or options.OTEL_EXPORTER_OTLP_ENDPOINT
     )
@@ -90,23 +185,44 @@ def pytest_sessionstart(session):
         os.environ["TRACEPARENT"] = traceparent
     init_telemetry_provider(options)
     tracer = get_tracer(options.OTEL_SESSION_NAME, options.OTEL_SERVICE_NAME)
-    session_span = tracer.start_span(
-        options.OTEL_SESSION_NAME, record_exception=True, set_status_on_exception=True
+    session_context_stack = ExitStack()
+    session_context_stack.enter_context(
+        tracer.start_as_current_span(
+            options.OTEL_SESSION_NAME,
+            record_exception=True,
+            set_status_on_exception=True,
+        )
     )
-    session_span_iterator = trace.use_span(session_span, end_on_exit=True)
-    session_span_iterator.__enter__()  # noqa
 
 
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config):
+    """
+    Sets up telemetry collection and starts the session span, if not already started previously
+    """
+    global session_context_stack
+    if session_context_stack is None:
+        init_telemetry(config)
+
+
+@pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus):  # noqa: U100
-    """Ends the session span with the session outcome"""
-    global session_span, session_span_iterator
-    if session_span is not None:
+    """Sets properties on the session span with the session outcome"""
+    session_span = trace.get_current_span()
+    if session_span.is_recording():
         outcome = _exit_code_to_outcome(exitstatus)
         session_span.set_attribute("tests.status", outcome)
         session_span.set_status(_convert_outcome(outcome))
         trace_id = session_span.get_span_context().trace_id
         _logger().info(f"Trace ID for pytest session is {trace_id:32x}")
-        session_span_iterator.__exit__(None, None, None)  # noqa
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    """Ends the session span"""
+    global session_context_stack
+    if session_context_stack:
+        session_context_stack.close()
     flush_telemetry_data()
 
 

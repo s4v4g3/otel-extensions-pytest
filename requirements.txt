@@ -1,4 +1,4 @@
 opentelemetry-api
 opentelemetry-sdk
-otel-extensions>=0.0.6
-pytest>=5.0.0
+otel-extensions>=0.1.0
+pytest>=6.2.0
