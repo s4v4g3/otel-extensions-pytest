@@ -60,7 +60,7 @@ The full set of options are shown here:
 
 ### `@instrumented_fixture` decorator
 
-You can decorate fixtures by using the `@instrumented_fixture` decorator.  If the span is a generator (i.e. has a `yield` statement), separate spans will be created for the setup and teardown phases.
+You can decorate fixtures by using the `@instrumented_fixture` decorator.  If the fixture is a generator (i.e. has a `yield` statement), separate spans will be created for the setup and teardown phases.
 
 
 ```python
