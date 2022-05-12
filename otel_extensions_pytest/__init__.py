@@ -5,7 +5,6 @@ from otel_extensions import (
     TelemetryOptions as BaseTelemetryOptions,
     flush_telemetry_data,
     get_tracer,
-    Instrumented,
 )
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode, Span, Tracer
@@ -15,8 +14,10 @@ from typing import Optional, Union, Callable, Iterable, Any
 import traceback
 import pytest
 from _pytest.fixtures import FixtureFunctionMarker
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from pydantic import root_validator
+from functools import wraps
+import inspect
 
 DEFAULT_SESSION_NAME = "pytest session"
 DEFAULT_SERVICE_NAME = "otel_extensions_pytest"
@@ -41,7 +42,7 @@ class TelemetryOptions(BaseTelemetryOptions):
         validate_assignment = True
 
 
-class InstrumentedFixture(Instrumented):
+class InstrumentedFixture:
     """Helper class for wrapping a fixture function"""
 
     def __init__(
@@ -50,11 +51,48 @@ class InstrumentedFixture(Instrumented):
         span_name: str = None,
         service_name: str = None,
     ):
-        super().__init__(span_name, service_name)
+
         self.fixture = fixture
+        self.span_name = span_name
+        self.service_name = service_name
+
+    def is_generator(self, func: object) -> bool:
+        genfunc = inspect.isgeneratorfunction(func)
+        return genfunc and not self.iscoroutinefunction(func)
+
+    def iscoroutinefunction(self, func: object) -> bool:
+        return inspect.iscoroutinefunction(func) or getattr(
+            func, "_is_coroutine", False
+        )
 
     def __call__(self, wrapped_function: Callable) -> Callable:
-        new_f = super(wrapped_function)
+        @wraps(wrapped_function)
+        def new_f(*args, **kwargs):
+            module = inspect.getmodule(wrapped_function)
+            module_name = __name__
+            if module is not None:
+                module_name = module.__name__
+            span_name = self.span_name or wrapped_function.__qualname__
+            if self.is_generator(wrapped_function):
+                generator = wrapped_function(*args, **kwargs)
+                with get_tracer(
+                    module_name, service_name=self.service_name
+                ).start_as_current_span(f"{span_name} (setup)"):
+                    x = next(generator)
+                yield x
+                with get_tracer(
+                    module_name, service_name=self.service_name
+                ).start_as_current_span(f"{span_name} (teardown)"):
+                    try:
+                        next(generator)
+                    except StopIteration:
+                        pass
+            else:
+                with get_tracer(
+                    module_name, service_name=self.service_name
+                ).start_as_current_span(span_name):
+                    return wrapped_function(*args, **kwargs)
+
         return self.fixture(new_f)
 
 
@@ -237,15 +275,39 @@ def pytest_unconfigure(config):
     flush_telemetry_data()
 
 
-@pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_protocol(item, nextitem):
+@contextmanager
+def create_runtest_span(span_name: str, test_name):
     global tracer
     with tracer.start_as_current_span(
-        item.name,
+        span_name,
         record_exception=True,
         set_status_on_exception=True,
     ) as span:
-        span.set_attribute("tests.name", item.name)
+        span.set_attribute("tests.name", test_name)
+        yield
+
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_protocol(item, nextitem):
+    with create_runtest_span(item.name, item.name):
+        yield
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_setup(item):
+    with create_runtest_span(f"{item.name} (setup)", item.name):
+        yield
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item):
+    with create_runtest_span(f"{item.name} (call)", item.name):
+        yield
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_teardown(item):
+    with create_runtest_span(f"{item.name} (teardown)", item.name):
         yield
 
 

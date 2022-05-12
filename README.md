@@ -59,16 +59,26 @@ The full set of options are shown here:
 ## Additional Features
 ###`@instrumented_fixture` decorator
 
-You can decorate fixtures by using the `@instrumented_fixture` decorator.
+You can decorate fixtures by using the `@instrumented_fixture` decorator.  If the span is a generator (i.e. has a `yield` statement), separate spans will be created for the setup and teardown phases.
 
 
 ```python
 from otel_extensions_pytest import instrumented_fixture
 
 # note: all options of pytest.fixture() are supported (autouse, etc)
-@instrumented_fixture(scope="session")
+@instrumented_fixture(scope="function")
 def my_fixture():
     """ Span is automatically created using `my_fixture` as span name """
-    ...
+    return "foo"
 
+@instrumented_fixture(scope="function")
+def my_generator_fixture():
+    # A span named `my_generator_fixture (setup)` is automatically created for this section
+    time.sleep(5)
+    
+    yield "foo"
+    
+    # A span named `my_generator_fixture (teardown)` is automatically created for this section
+    time.sleep(5)
+    
 ```
