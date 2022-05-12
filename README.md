@@ -34,9 +34,9 @@ python setup.py install --user
 
 Enable the plugin by adding
 ```python
-pytest_plugins = ("otel_extensions",)
+pytest_plugins = ("otel_extensions_pytest",)
 ```
-to your `conftest.py`, or by adding the option `-p otel_extensions` to the pytest command line. 
+to your `conftest.py`, or by adding the option `-p otel_extensions_pytest` to the pytest command line. 
 
 For tracing to be enabled, you need to specify a trace receiver endpoint using the command-line option
 `--otel-endpoint` or by setting the environment variable `OTEL_EXPORTER_OTLP_ENDPOINT`.
