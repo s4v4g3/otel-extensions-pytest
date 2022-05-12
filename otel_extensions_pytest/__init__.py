@@ -16,6 +16,7 @@ import traceback
 import pytest
 from _pytest.fixtures import FixtureFunctionMarker
 from contextlib import ExitStack
+from pydantic import root_validator
 
 DEFAULT_SESSION_NAME = "pytest session"
 DEFAULT_SERVICE_NAME = "otel_extensions_pytest"
@@ -28,6 +29,16 @@ class TelemetryOptions(BaseTelemetryOptions):
     """Settings class holding options for telemetry"""
 
     OTEL_SESSION_NAME: str = DEFAULT_SESSION_NAME
+
+    @root_validator
+    def update_env(cls, values):
+        for k, v in values.items():
+            if v is not None:
+                os.environ[k] = v
+        return values
+
+    class Config:
+        validate_assignment = True
 
 
 class InstrumentedFixture(Instrumented):
