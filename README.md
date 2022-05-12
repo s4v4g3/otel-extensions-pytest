@@ -47,17 +47,17 @@ The full set of options are shown here:
 
 | Command-line Option     | Environment Variable                                                      | Description                                                                                                                                                                      |
 |-------------------------|---------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--otel_service_name` | `OTEL_SERVICE_NAME` | Name of resource/service for traces                                                                                                                                              |
-| `--otel_session_name` | `OTEL_SESSION_NAME` | Name of parent session span                                                                                                                                                      |
-| `--otel-endpoint`       | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP Receiver Endpoint                                                                                                                                                           |
+| `--otel_service_name`   | `OTEL_SERVICE_NAME` | Name of resource/service for traces                                                                                                                                              |
+| `--otel_session_name`   | `OTEL_SESSION_NAME` | Name of parent session span                                                                                                                                                      |
+| `--otel_endpoint`       | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP Receiver Endpoint                                                                                                                                                           |
 | `--otel_protocol`       | `OTEL_EXPORTER_OTLP_PROTOCOL` | protocol for OTLP receiver (supported: `gprc` , `http/protobuf` , `custom`)                                                                                                      |
 | `--otel_processor_type` | `OTEL_PROCESSOR_TYPE` | Span Processor type (batch:  use `BatchSpanProcessor`,    simple: use `SimpleSpanProcessor`                                                                                      |
 | `--otel_traceparent`    | `TRACEPARENT` | Parent span id.  Will be injected into current context (useful when running automated tests using the [OpenTelemetry Jenkins](https://plugins.jenkins.io/opentelemetry/) plugin) |
 | n/a                     | `OTEL_EXPORTER_OTLP_CERTIFICATE` | path to CA bundle for verifying TLS cert of receiver endpoint                                                                                                                    |
-| n/a | `OTEL_EXPORTER_CUSTOM_SPAN_EXPORTER_TYPE` | Custom span exporter class (needed if protocol set to `custom`)                                                                                                                  |
+| n/a                     | `OTEL_EXPORTER_CUSTOM_SPAN_EXPORTER_TYPE` | Custom span exporter class (needed if protocol set to `custom`)                                                                                                                  |
 
 ## Additional Features
-`instrumented_fixture` decorator
+###`@instrumented_fixture` decorator
 
 You can decorate fixtures by using the `@instrumented_fixture` decorator.
 
