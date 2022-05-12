@@ -91,7 +91,11 @@ class InstrumentedFixture:
                 with get_tracer(
                     module_name, service_name=self.service_name
                 ).start_as_current_span(span_name):
-                    return wrapped_function(*args, **kwargs)
+                    # even if the original fixture is not a generator, since we're wrapping it with
+                    # this function we turn it into a generator (due to the inclusion of the yield statement in the case
+                    # above). Thus, pytest expects us to yield a value and not just return the result of the original
+                    # function.
+                    yield wrapped_function(*args, **kwargs)
 
         return self.fixture(new_f)
 
