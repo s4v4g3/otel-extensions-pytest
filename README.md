@@ -57,7 +57,8 @@ The full set of options are shown here:
 | n/a                     | `OTEL_EXPORTER_CUSTOM_SPAN_EXPORTER_TYPE` | Custom span exporter class (needed if protocol set to `custom`)                                                                                                                  |
 
 ## Additional Features
-###`@instrumented_fixture` decorator
+
+### `@instrumented_fixture` decorator
 
 You can decorate fixtures by using the `@instrumented_fixture` decorator.  If the span is a generator (i.e. has a `yield` statement), separate spans will be created for the setup and teardown phases.
 
