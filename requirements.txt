@@ -1,5 +1,5 @@
 opentelemetry-api
 opentelemetry-sdk
-otel-extensions>=0.1.1
+otel-extensions>=1.0.0
 pytest>=6.2.0
 typing_extensions

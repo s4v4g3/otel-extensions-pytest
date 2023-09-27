@@ -15,7 +15,6 @@ import traceback
 import pytest
 from _pytest.fixtures import FixtureFunctionMarker
 from contextlib import ExitStack, contextmanager
-from pydantic import root_validator
 from functools import wraps
 import inspect
 
@@ -31,15 +30,13 @@ class TelemetryOptions(BaseTelemetryOptions):
 
     OTEL_SESSION_NAME: str = DEFAULT_SESSION_NAME
 
-    @root_validator
-    def update_env(cls, values):
-        for k, v in values.items():
-            if v is not None:
-                os.environ[k] = v
-        return values
-
-    class Config:
-        validate_assignment = True
+    def __init__(self, *_args, **kwargs):
+        super().__init__(**kwargs)
+        all_attrs = [attr for attr in dir(self.__class__) if not attr.startswith("_")]
+        for attr in all_attrs:
+            value = getattr(self, attr)
+            if value is not None:
+                os.environ[attr] = value
 
 
 class InstrumentedFixture:
@@ -51,7 +48,6 @@ class InstrumentedFixture:
         span_name: str = None,
         service_name: str = None,
     ):
-
         self.fixture = fixture
         self.span_name = span_name
         self.service_name = service_name
@@ -61,9 +57,7 @@ class InstrumentedFixture:
         return genfunc and not self.iscoroutinefunction(func)
 
     def iscoroutinefunction(self, func: object) -> bool:
-        return inspect.iscoroutinefunction(func) or getattr(
-            func, "_is_coroutine", False
-        )
+        return inspect.iscoroutinefunction(func) or getattr(func, "_is_coroutine", False)
 
     def __call__(self, wrapped_function: Callable) -> Callable:
         @wraps(wrapped_function)
@@ -75,22 +69,20 @@ class InstrumentedFixture:
             span_name = self.span_name or wrapped_function.__qualname__
             if self.is_generator(wrapped_function):
                 generator = wrapped_function(*args, **kwargs)
-                with get_tracer(
-                    module_name, service_name=self.service_name
-                ).start_as_current_span(f"{span_name} (setup)"):
+                with get_tracer(module_name, service_name=self.service_name).start_as_current_span(
+                    f"{span_name} (setup)"
+                ):
                     x = next(generator)
                 yield x
-                with get_tracer(
-                    module_name, service_name=self.service_name
-                ).start_as_current_span(f"{span_name} (teardown)"):
+                with get_tracer(module_name, service_name=self.service_name).start_as_current_span(
+                    f"{span_name} (teardown)"
+                ):
                     try:
                         next(generator)
                     except StopIteration:
                         pass
             else:
-                with get_tracer(
-                    module_name, service_name=self.service_name
-                ).start_as_current_span(span_name):
+                with get_tracer(module_name, service_name=self.service_name).start_as_current_span(span_name):
                     # even if the original fixture is not a generator, since we're wrapping it with
                     # this function we turn it into a generator (due to the inclusion of the yield statement in the case
                     # above). Thus, pytest expects us to yield a value and not just return the result of the original
@@ -161,9 +153,7 @@ def instrumented_fixture(
 
     """
     marker = InstrumentedFixture(
-        fixture=FixtureFunctionMarker(
-            scope=scope, params=params, autouse=autouse, ids=ids, name=name
-        ),
+        fixture=FixtureFunctionMarker(scope=scope, params=params, autouse=autouse, ids=ids, name=name),
         span_name=span_name,
     )
 
@@ -175,9 +165,7 @@ def instrumented_fixture(
 
 def pytest_addoption(parser):
     """Init command line arguments"""
-    group = parser.getgroup(
-        "otel-extensions-pytest", "options for OpenTelemetry tracing"
-    )
+    group = parser.getgroup("otel-extensions-pytest", "options for OpenTelemetry tracing")
     group.addoption(
         "--otel-endpoint",
         dest="otel_endpoint",
@@ -218,21 +206,11 @@ def init_telemetry(config: pytest.Config, options: Optional[TelemetryOptions] = 
         return
     if options is None:
         options = TelemetryOptions()
-    options.OTEL_EXPORTER_OTLP_ENDPOINT = (
-        config.getoption("otel_endpoint") or options.OTEL_EXPORTER_OTLP_ENDPOINT
-    )
-    options.OTEL_EXPORTER_OTLP_PROTOCOL = (
-        config.getoption("otel_protocol") or options.OTEL_EXPORTER_OTLP_PROTOCOL
-    )
-    options.OTEL_PROCESSOR_TYPE = (
-        config.getoption("otel_processor_type") or options.OTEL_PROCESSOR_TYPE
-    )
-    options.OTEL_SERVICE_NAME = (
-        config.getoption("otel_service_name") or options.OTEL_SERVICE_NAME
-    )
-    options.OTEL_SESSION_NAME = (
-        config.getoption("otel_session_name") or options.OTEL_SESSION_NAME
-    )
+    options.OTEL_EXPORTER_OTLP_ENDPOINT = config.getoption("otel_endpoint") or options.OTEL_EXPORTER_OTLP_ENDPOINT
+    options.OTEL_EXPORTER_OTLP_PROTOCOL = config.getoption("otel_protocol") or options.OTEL_EXPORTER_OTLP_PROTOCOL
+    options.OTEL_PROCESSOR_TYPE = config.getoption("otel_processor_type") or options.OTEL_PROCESSOR_TYPE
+    options.OTEL_SERVICE_NAME = config.getoption("otel_service_name") or options.OTEL_SERVICE_NAME
+    options.OTEL_SESSION_NAME = config.getoption("otel_session_name") or options.OTEL_SESSION_NAME
     traceparent = config.getoption("otel_traceparent") or os.environ.get("TRACEPARENT")
     if traceparent:
         os.environ["TRACEPARENT"] = traceparent
@@ -334,11 +312,7 @@ def pytest_exception_interact(
 ):
     if isinstance(report, pytest.TestReport) and call.excinfo is not None:
         span = trace.get_current_span()
-        stack_trace = repr(
-            traceback.format_exception(
-                call.excinfo.type, call.excinfo.value, call.excinfo.tb
-            )
-        )
+        stack_trace = repr(traceback.format_exception(call.excinfo.type, call.excinfo.value, call.excinfo.tb))
         span.set_attribute("tests.error", stack_trace)
 
 
