@@ -8,7 +8,7 @@ def dummy_fixture():
 
 @instrumented_fixture
 def dummy_fixture_2():
-    return 24
+    yield 24
 
 
 def test_dummy_fixtures(dummy_fixture, dummy_fixture_2):
