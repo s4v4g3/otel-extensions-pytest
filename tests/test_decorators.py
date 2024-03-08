@@ -2,4 +2,4 @@ import otel_extensions_pytest
 
 
 def test_nothing():
-    assert 1 == 1
+    assert otel_extensions_pytest.DEFAULT_SESSION_NAME == "pytest session"
