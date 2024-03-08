@@ -153,7 +153,7 @@ def instrumented_fixture(
 
     """
     marker = InstrumentedFixture(
-        fixture=FixtureFunctionMarker(scope=scope, params=params, autouse=autouse, ids=ids, name=name),
+        fixture=pytest.fixture(scope=scope, params=params, autouse=autouse, ids=ids, name=name),
         span_name=span_name,
     )
 
