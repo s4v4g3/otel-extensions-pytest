@@ -7,10 +7,10 @@ from otel_extensions import (
     get_tracer,
 )
 from opentelemetry import trace
-from opentelemetry.trace import Status, StatusCode, Span, Tracer
+from opentelemetry.trace import Status, StatusCode, Tracer
 import logging
 from typing_extensions import Literal
-from typing import Optional, Union, Callable, Iterable, Any
+from typing import Optional, Union, Callable, Iterable, Any, Generator, cast, Sequence, Mapping
 import traceback
 import pytest
 from _pytest.fixtures import FixtureFunctionMarker
@@ -30,7 +30,7 @@ class TelemetryOptions(BaseTelemetryOptions):
 
     OTEL_SESSION_NAME: str = DEFAULT_SESSION_NAME
 
-    def __init__(self, *_args, **kwargs):
+    def __init__(self, *_args: Sequence[Any], **kwargs: Mapping[str, Any]) -> None:
         super().__init__(**kwargs)
         all_attrs = [attr for attr in dir(self.__class__) if not attr.startswith("_")]
         for attr in all_attrs:
@@ -45,9 +45,9 @@ class InstrumentedFixture:
     def __init__(
         self,
         fixture: FixtureFunctionMarker,
-        span_name: str = None,
-        service_name: str = None,
-    ):
+        span_name: Optional[str] = None,
+        service_name: Optional[str] = None,
+    ) -> None:
         self.fixture = fixture
         self.span_name = span_name
         self.service_name = service_name
@@ -59,9 +59,9 @@ class InstrumentedFixture:
     def iscoroutinefunction(self, func: object) -> bool:
         return inspect.iscoroutinefunction(func) or getattr(func, "_is_coroutine", False)
 
-    def __call__(self, wrapped_function: Callable) -> Callable:
+    def __call__(self, wrapped_function: Callable[[Any], Any]) -> Callable[[Any], Any]:
         @wraps(wrapped_function)
-        def new_f(*args, **kwargs):
+        def new_f(*args: Sequence[Any], **kwargs: Mapping[str, Any]) -> Generator[None, None, Any]:
             module = inspect.getmodule(wrapped_function)
             module_name = __name__
             if module is not None:
@@ -93,20 +93,20 @@ class InstrumentedFixture:
 
 
 def instrumented_fixture(
-    fixture_function: Optional[Callable] = None,
+    fixture_function: Optional[Callable[[Any], Any]] = None,
     *,
     scope: Literal["session", "module", "package", "class", "function"] = "function",
     params: Optional[Iterable[object]] = None,
     autouse: bool = False,
     ids: Optional[
         Union[
-            Iterable[Union[None, str, float, int, bool]],
+            Sequence[Optional[object]],
             Callable[[Any], Optional[object]],
         ]
     ] = None,
     name: Optional[str] = None,
     span_name: Optional[str] = None,
-) -> Union[FixtureFunctionMarker, Callable]:
+) -> Union[FixtureFunctionMarker, Callable[[Any], Any]]:
     """
     Decorator to enable opentelemetry instrumentation on a pytest fixture.
 
@@ -153,7 +153,7 @@ def instrumented_fixture(
 
     """
     marker = InstrumentedFixture(
-        fixture=FixtureFunctionMarker(scope=scope, params=params, autouse=autouse, ids=ids, name=name),
+        fixture=pytest.fixture(scope=scope, params=params, autouse=autouse, ids=ids, name=name),
         span_name=span_name,
     )
 
@@ -163,7 +163,7 @@ def instrumented_fixture(
     return marker
 
 
-def pytest_addoption(parser):
+def pytest_addoption(parser: pytest.Parser) -> None:
     """Init command line arguments"""
     group = parser.getgroup("otel-extensions-pytest", "options for OpenTelemetry tracing")
     group.addoption(
@@ -199,7 +199,7 @@ def pytest_addoption(parser):
     )
 
 
-def init_telemetry(config: pytest.Config, options: Optional[TelemetryOptions] = None):
+def init_telemetry(config: pytest.Config, options: Optional[TelemetryOptions] = None) -> None:
     global session_context_stack, tracer
     if session_context_stack is not None:
         _logger().error("init_telemetry can only be called once!")
@@ -216,6 +216,7 @@ def init_telemetry(config: pytest.Config, options: Optional[TelemetryOptions] = 
         os.environ["TRACEPARENT"] = traceparent
     init_telemetry_provider(options)
     tracer = get_tracer(options.OTEL_SESSION_NAME, options.OTEL_SERVICE_NAME)
+
     session_context_stack = ExitStack()
     session_context_stack.enter_context(
         tracer.start_as_current_span(
@@ -227,7 +228,7 @@ def init_telemetry(config: pytest.Config, options: Optional[TelemetryOptions] = 
 
 
 @pytest.hookimpl(tryfirst=True)
-def pytest_configure(config):
+def pytest_configure(config: pytest.Config) -> None:
     """
     Sets up telemetry collection and starts the session span, if not already started previously
     """
@@ -237,7 +238,7 @@ def pytest_configure(config):
 
 
 @pytest.hookimpl(trylast=True)
-def pytest_sessionfinish(session, exitstatus):  # noqa: U100
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:  # noqa: U100
     """Sets properties on the session span with the session outcome"""
     session_span = trace.get_current_span()
     if session_span.is_recording():
@@ -249,7 +250,7 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: U100
 
 
 @pytest.hookimpl(trylast=True)
-def pytest_unconfigure(config):
+def pytest_unconfigure(config: pytest.Config) -> None:
     """Ends the session span"""
     global session_context_stack
     if session_context_stack:
@@ -258,44 +259,48 @@ def pytest_unconfigure(config):
 
 
 @contextmanager
-def create_runtest_span(span_name: str, test_name):
+def create_runtest_span(span_name: str, test_name: str) -> Generator[None, None, None]:
     global tracer
-    with tracer.start_as_current_span(
-        span_name,
-        record_exception=True,
-        set_status_on_exception=True,
-    ) as span:
-        span.set_attribute("tests.name", test_name)
+    if tracer is not None:
+        with tracer.start_as_current_span(
+            span_name,
+            record_exception=True,
+            set_status_on_exception=True,
+        ) as span:
+            span.set_attribute("tests.name", test_name)
+            yield
+    else:
         yield
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_protocol(item, nextitem):
+def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item) -> Generator[None, None, None]:
     with create_runtest_span(item.name, item.name):
         yield
 
 
 @pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_setup(item):
+def pytest_runtest_setup(item: pytest.Item) -> Generator[None, None, None]:
     with create_runtest_span(f"{item.name} (setup)", item.name):
         yield
 
 
 @pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_call(item):
+def pytest_runtest_call(item: pytest.Item) -> Generator[None, None, None]:
     with create_runtest_span(f"{item.name} (call)", item.name):
         yield
 
 
 @pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_teardown(item):
+def pytest_runtest_teardown(item: pytest.Item) -> Generator[None, None, None]:
     with create_runtest_span(f"{item.name} (teardown)", item.name):
         yield
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_makereport(item, call):  # noqa
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[Any]) -> Generator[None, None, None]:  # noqa
     report = yield
+    report = cast(pytest.TestReport, report)
     rep = report.get_result()
 
     if rep.when == "call":
@@ -306,10 +311,10 @@ def pytest_runtest_makereport(item, call):  # noqa
 
 
 def pytest_exception_interact(
-    node: Union[pytest.Item, pytest.Collector],
-    call: pytest.CallInfo,
+    node: Union[pytest.Item, pytest.Collector],  # NOSONAR
+    call: pytest.CallInfo[Any],
     report: Union[pytest.CollectReport, pytest.TestReport],
-):
+) -> None:
     if isinstance(report, pytest.TestReport) and call.excinfo is not None:
         span = trace.get_current_span()
         stack_trace = repr(traceback.format_exception(call.excinfo.type, call.excinfo.value, call.excinfo.tb))
@@ -317,7 +322,7 @@ def pytest_exception_interact(
 
 
 @pytest.hookimpl()
-def pytest_runtest_logreport(report):
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
     if report.failed and report.when == "call":
         span = trace.get_current_span()
         span.set_attribute("tests.stderr", report.capstderr)
@@ -325,7 +330,7 @@ def pytest_runtest_logreport(report):
         span.set_attribute("tests.duration", getattr(report, "duration", 0.0))
 
 
-def _logger():
+def _logger() -> logging.Logger:
     return logging.getLogger(__name__)
 
 
