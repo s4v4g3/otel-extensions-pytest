@@ -1,5 +1,16 @@
-import otel_extensions_pytest
+from otel_extensions_pytest import instrumented_fixture
 
 
-def test_nothing():
-    assert otel_extensions_pytest.DEFAULT_SESSION_NAME == "pytest session"
+@instrumented_fixture()
+def dummy_fixture():
+    return 42
+
+
+@instrumented_fixture
+def dummy_fixture_2():
+    return 24
+
+
+def test_dummy_fixtures(dummy_fixture, dummy_fixture_2):
+    assert dummy_fixture == 42
+    assert dummy_fixture_2 == 24

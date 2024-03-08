@@ -1,5 +1,5 @@
-from otel_extensions_pytest import _convert_outcome, _exit_code_to_outcome
-from opentelemetry.trace import Status, StatusCode
+from otel_extensions_pytest import _convert_outcome, _exit_code_to_outcome, _logger
+from opentelemetry.trace import StatusCode
 
 
 def test_convert_outcome():
@@ -16,3 +16,8 @@ def test_exit_code_to_outcome():
     assert _exit_code_to_outcome(4) == "usage_error"
     assert _exit_code_to_outcome(5) == "no_tests_collected"
     assert _exit_code_to_outcome(6) == "failed"
+
+
+def test_logger():
+    l = _logger()
+    assert l.name == "otel_extensions_pytest"

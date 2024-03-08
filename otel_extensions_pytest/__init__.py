@@ -306,7 +306,7 @@ def pytest_runtest_makereport(item, call):  # noqa
 
 
 def pytest_exception_interact(
-    node: Union[pytest.Item, pytest.Collector],
+    node: Union[pytest.Item, pytest.Collector],  # NOSONAR
     call: pytest.CallInfo,
     report: Union[pytest.CollectReport, pytest.TestReport],
 ):
